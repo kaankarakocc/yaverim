@@ -1,0 +1,323 @@
+// Yaverim — Prisma Schema
+// DB: PostgreSQL | ORM: Prisma
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum ToolStatus {
+  CANDIDATE
+  TRACKED
+  CORE
+  PRIORITY
+  DEPRECATED
+}
+
+enum PricingTier {
+  FREE
+  LOW
+  MID
+  HIGH
+  ENTERPRISE
+}
+
+enum DifficultyLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum TurkishSupport {
+  NONE
+  PARTIAL
+  FULL
+}
+
+enum UserType {
+  INDIVIDUAL
+  FREELANCER
+  FOUNDER
+  TEAM
+}
+
+enum BudgetTier {
+  FREE_ONLY
+  LOW
+  MID
+  BEST
+}
+
+enum TeamStructure {
+  SOLO
+  SMALL
+  GROWING
+  ESTABLISHED
+}
+
+// ─── Tool ─────────────────────────────────────────────────────────────────────
+
+model Tool {
+  id          String @id @default(cuid())
+  slug        String @unique
+
+  name        String
+  tagline     String
+  description String @db.Text
+  websiteUrl  String
+  logoPath    String?
+
+  category    String
+  subUseCases String[]
+  solutionAreas String[]
+  sectorFit   String[]
+
+  hasFree     Boolean @default(false)
+  hasTrial    Boolean @default(false)
+  pricingTier PricingTier @default(FREE)
+
+  hasAffiliate  Boolean @default(false)
+  hasPartnership Boolean @default(false)
+
+  turkishSupport TurkishSupport @default(NONE)
+  difficultyLevel DifficultyLevel @default(BEGINNER)
+
+  // Score axes (0–10, stored as floats)
+  scoreFitToNeed        Float @default(5)
+  scoreEaseOfUse        Float @default(5)
+  scorePriceValue       Float @default(5)
+  scoreProductivityImpact Float @default(5)
+  scoreGrowthImpact     Float @default(5)
+  scoreIntegrationFit   Float @default(5)
+
+  strengths       String[]
+  weaknesses      String[]
+  whyRecommended  String @db.Text
+  notSuitableFor  String[]
+  similarTools    String[]
+  freeAlternatives String[]
+
+  suitableForUserTypes UserType[]
+
+  status      ToolStatus @default(TRACKED)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  rankingEntries RankingEntry[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([category])
+}
+
+// ─── Ranking ──────────────────────────────────────────────────────────────────
+
+enum RankingPeriod {
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model Ranking {
+  id        String @id @default(cuid())
+  period    RankingPeriod
+  category  String?  // null = overall; non-null = category-specific
+  weekOf    DateTime // Start date of the ranking window
+  isPublished Boolean @default(false)
+
+  entries   RankingEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([period, category, weekOf])
+  @@index([period, weekOf])
+}
+
+model RankingEntry {
+  id        String @id @default(cuid())
+  ranking   Ranking @relation(fields: [rankingId], references: [id])
+  rankingId String
+  tool      Tool @relation(fields: [toolId], references: [id])
+  toolId    String
+  rank      Int
+  isSponsored Boolean @default(false)
+
+  @@unique([rankingId, rank])
+  @@unique([rankingId, toolId])
+}
+
+// ─── Auth (NextAuth.js v5 / Auth.js) ──────────────────────────────────────────
+// Standard NextAuth schema. To activate, add @auth/prisma-adapter and pass
+// PrismaAdapter(db) in auth.ts.
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  analyses      Analysis[]
+  entitlements  Entitlement[]
+  savedPlans    SavedPlan[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Analysis (saved recommendation sessions) ────────────────────────────────
+
+model Analysis {
+  id          String   @id @default(cuid())
+  userId      String
+
+  // Onboarding params snapshot (URL search param key-value pairs)
+  paramsJson  Json
+
+  // Full recommendation result snapshot (engine output)
+  resultJson  Json
+
+  // Human-readable auto-generated title ("Freelancer · SEO · Ücretsiz")
+  title       String
+
+  // True when the user has unlocked the premium plan for this analysis
+  isPremiumUnlocked Boolean @default(false)
+
+  isFavorite  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entitlements Entitlement[]
+
+  @@index([userId])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model SavedPlan {
+  id         String   @id @default(cuid())
+  userId     String
+  analysisId String?
+  title      String
+  notes      String?  @db.Text
+  isFavorite Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Entitlements ─────────────────────────────────────────────────────────────
+// Tracks what premium content each user has access to.
+// Two access models:
+//   one_time_unlock      — user paid for a specific analysis result
+//   subscription_monthly — recurring subscription, access to all analyses
+//   subscription_annual  — annual subscription, discounted
+
+enum EntitlementType {
+  one_time_unlock
+  subscription_monthly
+  subscription_annual
+}
+
+enum EntitlementStatus {
+  active
+  expired
+  cancelled
+  refunded
+}
+
+model Entitlement {
+  id          String            @id @default(cuid())
+  userId      String
+  type        EntitlementType
+  status      EntitlementStatus @default(active)
+
+  // For one-time unlocks: which analysis this entitlement unlocks
+  analysisId  String?
+
+  // Payment provider reference (Stripe payment_intent_id or checkout_session_id)
+  paymentRef  String?
+
+  // For subscriptions: when access expires. Null = never (lifetime)
+  expiresAt   DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysis    Analysis?  @relation(fields: [analysisId], references: [id])
+
+  @@index([userId, status])
+  @@index([userId, type, status])
+}
+
+// ─── Analysis Session (legacy — kept for backward compatibility) ───────────────
+
+model AnalysisSession {
+  id          String @id @default(cuid())
+
+  userType    UserType
+  businessDescription String @db.Text
+  goals       String[]
+  teamStructure TeamStructure
+  budget      BudgetTier
+  freeText    String? @db.Text
+
+  diagnosis   String? @db.Text
+  solutionAreas String[]
+  resultJson  Json?
+
+  userId      String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
