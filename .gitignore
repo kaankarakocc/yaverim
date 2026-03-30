@@ -40,8 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Dynamic tool store (auto-generated from seed, grows with admin approvals)
-data/tools.json
+# Dynamic ops data (runtime generated)
 data/ops/
 data/rankings/
+
+# data/tools.json GitHub'da tutuluyor — araç verisi buradan besleniyor
 
